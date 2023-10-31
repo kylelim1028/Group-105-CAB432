@@ -1,0 +1,6 @@
+repo: a75d655b08b1be43db9964d453061e988377d1d7
+node: d97320e4591863ef8c4bcc10ee2c6e5fb6cdd4c3
+branch: default
+latesttag: GraphicsMagick-1_2Beta1
+latesttagdistance: 4801
+changessincelatesttag: 4872
