@@ -1,10 +1,10 @@
-const express = require('express')
+const express = require("express")
 
-const multer = require('multer')
+const multer = require("multer")
 
-const imageSize = require('image-size')
+const imageSize = require("image-size")
 
-const sharp = require('sharp')
+const sharp = require("sharp")
 
 var width
 
@@ -14,11 +14,11 @@ var outputFilePath
 
 var height
 
-const bodyParser = require('body-parser')
+const bodyParser = require("body-parser")
 
-const fs = require('fs')
+const fs = require("fs")
 
-const path = require('path')
+const path = require("path")
 
 var dir = "public";
 var subDirectory = "public/uploads";
@@ -66,11 +66,11 @@ var storage = multer.diskStorage({
 
 const PORT = process.env.PORT || 3000
 
-app.get('/',(req,res) => {
+app.get("/",(req,res) => {
     res.sendFile(__dirname + "/index.html")
 })
 
-app.post('/processimage',upload.single('file'),(req,res) => {
+app.post("/processimage",upload.single("file"),(req,res) => {
 
     format = req.body.format
 
