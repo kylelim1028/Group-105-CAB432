@@ -8,9 +8,9 @@ const path = require("path")
 const AWS = require("aws-sdk");
 
 var width
+var height
 var format
 var outputFilePath
-var height
 
 
 const app = express() 
@@ -83,9 +83,9 @@ app.get("/",(req,res) => {
 
 app.post("/processimage",upload.single("file"),(req,res) => {
 
-    // format = req.body.format
-    // width = parseInt(req.body.width)
-    // height = parseInt(req.body.height)
+    format = req.body.format
+    width = parseInt(req.body.width)
+    height = parseInt(req.body.height)
     
     // if(req.file){
     //     console.log(req.file.path)
@@ -108,7 +108,7 @@ app.post("/processimage",upload.single("file"),(req,res) => {
       console.log(req.file.path);
       
       // Upload the raw image to S3
-      uploadRawImage(req.file)
+      uploadRawImage(req.file, format, width, height)
         .then((s3Key) => {
           res.json({ s3Key }); // Return the S3 key of the uploaded raw image
         })
@@ -142,11 +142,23 @@ function processImage(width,height,req,res) {
       }
 }
 
-function uploadRawImage(file) {
+function uploadRawImage(file, format, width, height) {
   return new Promise((resolve, reject) => {
     const s3Key = `raw-images/${Date.now()}-${file.originalname}`;
     const body = fs.createReadStream(file.path);
-    const params = { Bucket: bucketName, Key: s3Key, Body: body };
+    
+    const metadata = {
+      "format" : `${format}`,
+      "width" : `${width}`,
+      "height" : `${height}`,
+    };
+
+    const params = { 
+      Bucket: bucketName, 
+      Key: s3Key, 
+      Body: body,
+      Metadata: metadata,
+    };
 
     s3.upload(params, (uploadErr, data) => {
       fs.unlinkSync(file.path);
