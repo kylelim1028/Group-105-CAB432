@@ -19,6 +19,94 @@ app.use(bodyParser.json())
 app.use(express.static("public"));
 
 
+//SQS Stuff
+const {SQSClient,
+       SendMessageCommand,
+       ReceiveMessageCommand,
+        DeleteMessageCommand} = require("@aws-sdk/client-sqs");
+const {configObject} = require("./credentials");
+const {} = require("sqs-consumer");
+
+const sqsClient = new SQSClient(configObject);
+const queueURL = "https://sqs.ap-southeast-2.amazonaws.com/901444280953/cab432_group105"
+
+const sendMessageToQueue = async(body)=>
+{
+  try {
+    const command = new SendMessageCommand({
+      MessageBody: body, 
+      QueueUrl : queueURL,
+      MessageAttribute : {
+        OrderID: {DataType: "String", StringValue: "4421x"},
+      },
+    });
+    const result = await sqsClient.send(command)
+    console.log(result, "success");
+  }
+  catch (error) //current issue
+  {
+    console.log(error, "oh no")
+  }
+}
+
+const DeleteMessageFromQueue = async (ReceiptHandle)=>
+{
+  try {
+    const data = await sqsClient.send(new DeleteMessageCommand({
+      QueueUrl:queueURL,
+      ReceiptHandle: ReceiptHandle
+    }))
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+const PollMessages = async()=>
+{
+  try
+  {
+    const command = new ReceiveMessageCommand({
+      MaxNumberOfMessages: 10,
+      QueueUrl: queueURL,
+      WaitTimeSeconds: 10,
+      MessageAttribute: ['All'],
+    });
+    const result = await sqsClient.send(command);
+    console.log(result.Messages);
+
+    //Do some computation
+
+    //Then delete it
+    const del_result = await DeleteMessageFromQueue(result.Messages[0].ReceiptHandle) //Delete the first message from Q
+    console.log("Delete successful...");
+  }
+  catch(error)
+  {
+    console.log(error);
+  }
+}
+
+//setInterval(PollMessages, 1000) //Do every 1 second
+//PollMessages(); - Used to receive SQS messages
+//sendMessageToQueue("First Message from Node") - Used to send SQS messages
+
+/*const autoQueueHandler = Consumer.create({
+  queueURL: queueURL,
+  sqs: sqsClient,
+  handleMessage: async(message) => 
+  {
+    console.log(message);
+  },
+});
+
+autoQueueHandler.on("processing_error", (err) =>
+{
+  console.log(err);
+});
+
+autoQueueHandler.start();
+*/
+
 var dir = "public";
 var subDirectory = "public/uploads";
 
