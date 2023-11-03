@@ -206,23 +206,7 @@ app.post("/processimage",upload.single("file"),(req,res) => {
 
 
 // Reads the image data
-function readingImageData(format, width, height, imageBuffer, req, res) {
-    // if(imageBuffer){
-    //   //console.log(req.file.path)
-
-    //   if(isNaN(width) || isNaN(height)){
-
-    //       var dimensions = imageSize(imageBuffer)
-    //       console.log(dimensions)
-    //       width = parseInt(dimensions.width)
-    //       height = parseInt(dimensions.height)
-    //       processImage(width, height, imageBuffer, req, res) // Start processing the image
-
-    //   }
-    //   else{
-    //       processImage(width, height, imageBuffer, req, res) // Start processing the image
-    //   }
-    // }
+function readingImageData(format, width, height, req, res) {
 
     if(req.file){
         //console.log(req.file.path)
@@ -233,54 +217,41 @@ function readingImageData(format, width, height, imageBuffer, req, res) {
            console.log(dimensions)
            width = parseInt(dimensions.width)
            height = parseInt(dimensions.height)
-           processImage(format, width, height, req, res)
+           processImage(format, width, height, req, res) // Start processing the image
 
         }
         else{
-            processImage(format, width, height, req, res)
+            processImage(format, width, height, req, res) // Start processing the image
         }
+    }
+    else {
+      console.log("NO REQ FILE");
     }
 }
 
+// Processes the image
 function processImage(format, width, height, req, res) {
 
   outputFilePath = Date.now() + "output." + format;
 
+  // Processes the image
   if (req.file) {
-      sharp(req.file.path)
+      sharp(path.join(__dirname, "raw-images", baseImageKey.split("/").pop()))
         .resize(width, height)
         .toFile(outputFilePath, (err, info) => {
           if (err) throw err;
+
+          // Downloads the image
           res.download(outputFilePath, (err) => {
             if (err) throw err;
             fs.unlinkSync(req.file.path);
             fs.unlinkSync(outputFilePath);
+            console.log("PROCESSED IMAGE");
           });
         });
     }
 }
 
-// // Processes the image
-// function processImage(width, height, imageBuffer, req, res) {
-
-//     outputFilePath = Date.now() + "output." + format;
-
-//     // Processes the image
-//     if (imageBuffer) {
-//         sharp(imageBuffer)
-//           .resize(width, height)
-//           .toFile(outputFilePath, (err, info) => {
-//             if (err) throw err;
-
-//             // Downloads the image
-//             res.download(outputFilePath, (err) => {
-//               if (err) throw err;
-//               fs.unlinkSync(imageBuffer);
-//               fs.unlinkSync(outputFilePath);
-//             });
-//           });
-//       }
-// }
 
 // Uploading the raw image to S3 bucket
 function uploadRawImage(file, format, width, height) {
