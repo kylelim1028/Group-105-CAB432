@@ -232,7 +232,7 @@ function readingImageData(format, width, height, req, res) {
 // Processes the image
 function processImage(format, width, height, req, res) {
 
-  outputFilePath = Date.now() + "output." + format;
+  outputFilePath = `processed-images/output-${width}x${height}-${req.file.originalname}`
 
   // Processes the image
   if (req.file) {
@@ -243,9 +243,6 @@ function processImage(format, width, height, req, res) {
 
           // Downloads the image
           res.download(outputFilePath, (err) => {
-            if (err) throw err;
-            fs.unlinkSync(req.file.path);
-            fs.unlinkSync(outputFilePath);
             console.log("PROCESSED IMAGE");
           });
         });
@@ -256,7 +253,8 @@ function processImage(format, width, height, req, res) {
 // Uploading the raw image to S3 bucket
 function uploadRawImage(file, format, width, height) {
   return new Promise((resolve, reject) => {
-    const s3Key = `raw-images/${Date.now()}-${file.originalname}`;
+
+    const s3Key = `raw-images/${width}x${height}-${file.originalname}`;
     const body = fs.createReadStream(file.path);
     
     // Metadata to hold format, width, and height
