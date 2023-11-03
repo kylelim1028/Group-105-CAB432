@@ -7,11 +7,15 @@ const fs = require("fs")
 const path = require("path")
 const AWS = require("aws-sdk");
 
-var width
-var height
-var format
-var outputFilePath
+var width // Image's width
+var height // Image's height
+var format // Image's format
+var outputFilePath // Download file path
+var baseImageKey // The S3 object's key
 
+var imageBuffer
+
+const PORT = process.env.PORT || 3000
 
 const app = express() 
 app.use(bodyParser.urlencoded({extended:false}))
@@ -19,7 +23,7 @@ app.use(bodyParser.json())
 app.use(express.static("public"));
 
 
-//SQS Stuff
+// SQS can send, receive, and delete messages
 const {SQSClient,
        SendMessageCommand,
        ReceiveMessageCommand,
@@ -28,8 +32,9 @@ const {configObject} = require("./credentials");
 const {} = require("sqs-consumer");
 
 const sqsClient = new SQSClient(configObject);
-const queueURL = "https://sqs.ap-southeast-2.amazonaws.com/901444280953/cab432_group105"
+const queueURL = "https://sqs.ap-southeast-2.amazonaws.com/901444280953/actual-cab432-group105"
 
+// Sends message to the queue, used for S3 object keys
 const sendMessageToQueue = async(body)=>
 {
   try {
@@ -41,14 +46,15 @@ const sendMessageToQueue = async(body)=>
       },
     });
     const result = await sqsClient.send(command)
-    console.log(result, "success");
+    //console.log(result, "success");
   }
-  catch (error) //current issue
+  catch (error)
   {
     console.log(error, "oh no")
   }
 }
 
+// Deletes messages from the queue, ensures a single instance
 const DeleteMessageFromQueue = async (ReceiptHandle)=>
 {
   try {
@@ -61,7 +67,8 @@ const DeleteMessageFromQueue = async (ReceiptHandle)=>
   }
 }
 
-const PollMessages = async()=>
+// Retrieves messages from the queue
+const PollMessages = async(req,res)=>
 {
   try
   {
@@ -72,13 +79,20 @@ const PollMessages = async()=>
       MessageAttribute: ['All'],
     });
     const result = await sqsClient.send(command);
-    console.log(result.Messages);
 
-    //Do some computation
+    // If any messages available
+    if (result.Messages && result.Messages.length > 0) {
+      console.log("First Message in Queue: " + result.Messages[0].Body); // First message in the queue
+      baseImageKey = result.Messages[0].Body; // Setting the S3 object's key
 
-    //Then delete it
-    const del_result = await DeleteMessageFromQueue(result.Messages[0].ReceiptHandle) //Delete the first message from Q
-    console.log("Delete successful...");
+      // Retrieve the object from S3 bucket
+      downloadRawImage(bucketName, baseImageKey, req, res)
+
+      // Then delete the first message
+      const del_result = await DeleteMessageFromQueue(result.Messages[0].ReceiptHandle)
+      console.log("Delete successful... " + result.Messages[0].ReceiptHandle);
+    }
+    
   }
   catch(error)
   {
@@ -86,9 +100,6 @@ const PollMessages = async()=>
   }
 }
 
-//setInterval(PollMessages, 1000) //Do every 1 second
-//PollMessages(); - Used to receive SQS messages
-//sendMessageToQueue("First Message from Node") - Used to send SQS messages
 
 /*const autoQueueHandler = Consumer.create({
   queueURL: queueURL,
@@ -112,10 +123,8 @@ var subDirectory = "public/uploads";
 
 if (!fs.existsSync(dir)) {
   fs.mkdirSync(dir);
-
   fs.mkdirSync(subDirectory);
 }
-
 
 var storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -145,7 +154,7 @@ var storage = multer.diskStorage({
   var upload = multer({ storage: storage, fileFilter: imageFilter });
    
 
-const PORT = process.env.PORT || 3000
+
 
 // S3 setup
 const bucketName = "group-105-bucket-kyle";
@@ -156,7 +165,7 @@ const s3 = new AWS.S3({ apiVersion: "2006-03-01" });
     await s3.createBucket({ Bucket: bucketName }).promise();
     console.log(`Created bucket: ${bucketName}`);
   } catch (err) {
-    // We will ignore 409 errors which indicate that the bucket already exists
+    // Ignore 409 errors which indicate that the bucket already exists
     if (err.statusCode !== 409) {
       console.log(`Error creating bucket: ${err}`);
     }
@@ -164,33 +173,18 @@ const s3 = new AWS.S3({ apiVersion: "2006-03-01" });
 })();
 
 
+// Uploading to the index page
 app.get("/",(req,res) => {
-    res.sendFile(__dirname + "/index.html")
+    res.sendFile(__dirname + "/index.html") // Processed image goes here
 })
 
-
+// Uploading raw image to S3
+// Sending message to SQS
 app.post("/processimage",upload.single("file"),(req,res) => {
 
     format = req.body.format
     width = parseInt(req.body.width)
     height = parseInt(req.body.height)
-    
-    // if(req.file){
-    //     console.log(req.file.path)
-
-    //     if(isNaN(width) || isNaN(height)){
-
-    //        var dimensions = imageSize(req.file.path)
-    //        console.log(dimensions)
-    //        width = parseInt(dimensions.width)
-    //        height = parseInt(dimensions.height)
-    //        processImage(width,height,req,res)
-
-    //     }
-    //     else{
-    //         processImage(width,height,req,res)
-    //     }
-    // }
 
     if (req.file) {
       console.log(req.file.path);
@@ -199,6 +193,10 @@ app.post("/processimage",upload.single("file"),(req,res) => {
       uploadRawImage(req.file, format, width, height)
         .then((s3Key) => {
           res.json({ s3Key }); // Return the S3 key of the uploaded raw image
+
+          sendMessageToQueue(`${s3Key}`) // Used to send SQS messages
+          PollMessages(req,res); // Used to receive SQS messages
+        
         })
         .catch((err) => {
           res.status(500).json({ error: err.message });
@@ -207,34 +205,90 @@ app.post("/processimage",upload.single("file"),(req,res) => {
 })
 
 
-app.listen(PORT,() => {
-    console.log(`App is listening on PORT ${PORT}`)
-})
+// Reads the image data
+function readingImageData(format, width, height, imageBuffer, req, res) {
+    // if(imageBuffer){
+    //   //console.log(req.file.path)
 
+    //   if(isNaN(width) || isNaN(height)){
 
-function processImage(width,height,req,res) {
+    //       var dimensions = imageSize(imageBuffer)
+    //       console.log(dimensions)
+    //       width = parseInt(dimensions.width)
+    //       height = parseInt(dimensions.height)
+    //       processImage(width, height, imageBuffer, req, res) // Start processing the image
 
-    outputFilePath = Date.now() + "output." + format;
+    //   }
+    //   else{
+    //       processImage(width, height, imageBuffer, req, res) // Start processing the image
+    //   }
+    // }
 
-    if (req.file) {
-        sharp(req.file.path)
-          .resize(width, height)
-          .toFile(outputFilePath, (err, info) => {
-            if (err) throw err;
-            res.download(outputFilePath, (err) => {
-              if (err) throw err;
-              fs.unlinkSync(req.file.path);
-              fs.unlinkSync(outputFilePath);
-            });
-          });
-      }
+    if(req.file){
+        //console.log(req.file.path)
+
+        if(isNaN(width) || isNaN(height)){
+
+           var dimensions = imageSize(req.file.path)
+           console.log(dimensions)
+           width = parseInt(dimensions.width)
+           height = parseInt(dimensions.height)
+           processImage(format, width, height, req, res)
+
+        }
+        else{
+            processImage(format, width, height, req, res)
+        }
+    }
 }
 
+function processImage(format, width, height, req, res) {
+
+  outputFilePath = Date.now() + "output." + format;
+
+  if (req.file) {
+      sharp(req.file.path)
+        .resize(width, height)
+        .toFile(outputFilePath, (err, info) => {
+          if (err) throw err;
+          res.download(outputFilePath, (err) => {
+            if (err) throw err;
+            fs.unlinkSync(req.file.path);
+            fs.unlinkSync(outputFilePath);
+          });
+        });
+    }
+}
+
+// // Processes the image
+// function processImage(width, height, imageBuffer, req, res) {
+
+//     outputFilePath = Date.now() + "output." + format;
+
+//     // Processes the image
+//     if (imageBuffer) {
+//         sharp(imageBuffer)
+//           .resize(width, height)
+//           .toFile(outputFilePath, (err, info) => {
+//             if (err) throw err;
+
+//             // Downloads the image
+//             res.download(outputFilePath, (err) => {
+//               if (err) throw err;
+//               fs.unlinkSync(imageBuffer);
+//               fs.unlinkSync(outputFilePath);
+//             });
+//           });
+//       }
+// }
+
+// Uploading the raw image to S3 bucket
 function uploadRawImage(file, format, width, height) {
   return new Promise((resolve, reject) => {
     const s3Key = `raw-images/${Date.now()}-${file.originalname}`;
     const body = fs.createReadStream(file.path);
     
+    // Metadata to hold format, width, and height
     const metadata = {
       "format" : `${format}`,
       "width" : `${width}`,
@@ -248,6 +302,7 @@ function uploadRawImage(file, format, width, height) {
       Metadata: metadata,
     };
 
+    // Uploading
     s3.upload(params, (uploadErr, data) => {
       fs.unlinkSync(file.path);
 
@@ -255,7 +310,44 @@ function uploadRawImage(file, format, width, height) {
         reject(uploadErr);
       } else {
         resolve(s3Key);
+        console.log("UPLOADED TO S3");
       }
     });
   });
 }
+
+// Downloading the raw image from S3
+function downloadRawImage(bucketName, baseImageKey, req, res) {
+  const params = {
+    Bucket: bucketName,
+    Key: baseImageKey,
+  };
+
+  // Downloading
+  s3.getObject(params, (err, data) => {
+    if (err) {
+      console.error(err);
+    } else {
+      imageBuffer = data.Body;
+      const metadata = data.Metadata;
+      console.log("Object Metadata:", metadata);
+
+      format = metadata.format;
+      width = parseInt(metadata.width);
+      height = parseInt(metadata.height);
+
+      // Saving it to raw-images directory
+      const localFilePath = __dirname + "/raw-images/" + baseImageKey.split("/").pop();
+      fs.writeFileSync(localFilePath, imageBuffer);
+      console.log("Image Downloaded to", localFilePath);
+
+      readingImageData(format, width, height, req, res);
+    }
+  });
+}
+
+
+
+app.listen(PORT,() => {
+  console.log(`App is listening on PORT ${PORT}`)
+})
