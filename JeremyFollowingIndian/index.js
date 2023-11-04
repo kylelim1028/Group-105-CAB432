@@ -190,7 +190,7 @@ app.post("/processimage",upload.single("file"),(req,res) => {
       console.log(req.file.path);
       
       // Upload the raw image to S3
-      uploadRawImage(req.file, format, width, height)
+      uploadRawImage(req.file, format, width, height, false)
         .then((s3Key) => {
           res.json({ s3Key }); // Return the S3 key of the uploaded raw image
 
@@ -251,12 +251,21 @@ function processImage(format, width, height, req, res) {
 
 
 // Uploading the raw image to S3 bucket
-function uploadRawImage(file, format, width, height) {
+function uploadRawImage(file, format, width, height, isProcessed) {
   return new Promise((resolve, reject) => {
 
-    const s3Key = `raw-images/${width}x${height}-${file.originalname}`;
+    let s3Key;
+
+    if (!isProcessed) {
+      s3Key = `raw-images/${width}x${height}-${file.originalname}`;
+      
+    }
+    else {
+      s3Key = `processed-images/output-${width}x${height}-${req.file.originalname}`;
+    }
+
     const body = fs.createReadStream(file.path);
-    
+
     // Metadata to hold format, width, and height
     const metadata = {
       "format" : `${format}`,
@@ -311,8 +320,25 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
       console.log("Image Downloaded to", localFilePath);
 
       readingImageData(format, width, height, req, res);
+      console.log("BITCH");
     }
   });
+
+  // Upload the processed image to S3
+  uploadRawImage(req.file, format, width, height, true)
+  .then((s3Key) => {
+    res.json({ s3Key }); // Return the S3 key of the uploaded raw image
+
+    // sendMessageToQueue(`${s3Key}`) // Used to send SQS messages
+    // PollMessages(req,res); // Used to receive SQS messages
+  
+  })
+  .catch((err) => {
+    console.log("ASS");
+    res.status(500).json({ error: err.message });
+  });
+
+  console.log("HOE");
 }
 
 
