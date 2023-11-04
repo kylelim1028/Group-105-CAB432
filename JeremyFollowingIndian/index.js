@@ -5,17 +5,20 @@ const sharp = require("sharp")
 const bodyParser = require("body-parser")
 const fs = require("fs")
 const path = require("path")
-const AWS = require("aws-sdk");
+const AWS = require("aws-sdk")
 
-var width // Image's width
-var height // Image's height
-var format // Image's format
+var width // Images width
+var height // Images height
+var format // Images format
 var outputFilePath // Download file path
-var baseImageKey // The S3 object's key
+var baseImageKey // The S3 objects key
 
 var imageBuffer
 
 const PORT = process.env.PORT || 3000
+
+// Set the AWS region
+AWS.config.update({ region: "ap-southeast-2" });
 
 const app = express() 
 app.use(bodyParser.urlencoded({extended:false}))
@@ -76,14 +79,14 @@ const PollMessages = async(req,res)=>
       MaxNumberOfMessages: 10,
       QueueUrl: queueURL,
       WaitTimeSeconds: 10,
-      MessageAttribute: ['All'],
+      MessageAttribute: ["All"],
     });
     const result = await sqsClient.send(command);
 
     // If any messages available
     if (result.Messages && result.Messages.length > 0) {
       console.log("First Message in Queue: " + result.Messages[0].Body); // First message in the queue
-      baseImageKey = result.Messages[0].Body; // Setting the S3 object's key
+      baseImageKey = result.Messages[0].Body; // Setting the S3 objects key
 
       // Retrieve the object from S3 bucket
       downloadRawImage(bucketName, baseImageKey, req, res)
@@ -178,6 +181,7 @@ app.get("/",(req,res) => {
     res.sendFile(__dirname + "/index.html") // Processed image goes here
 })
 
+
 // Uploading raw image to S3
 // Sending message to SQS
 app.post("/processimage",upload.single("file"),(req,res) => {
@@ -228,7 +232,7 @@ function readingImageData(format, width, height, req, res, baseImageKey) {
 
         }
         else{
-            processImage(format, width, height, req, res, rawImagePath) // Start processing the image
+          processImage(format, width, height, req, res, rawImagePath) // Start processing the image
         }
     }
     else {
@@ -248,23 +252,27 @@ function processImage(format, width, height, req, res, rawImagePath) {
         if (err) {
           console.error(err);
           res.status(500).json({ error: err.message }); // Send an error response
-        } else {
+        } 
+        
+        else {
           console.log("PROCESSED IMAGE");
-          // Now, upload the processed image to S3
+
+          // Upload the processed image to S3
           uploadRawImage(outputFilePath, format, width, height, true)
-            .then((s3Key) => {
-              // Send a success response with the S3 key
-              res.json({ s3Key, download: true });
-            })
-            .catch((err) => {
-              console.error(err);
-              res.status(500).json({ error: err.message });
-            });
+            // .then((s3Key) => {
+            //   res.json({ s3Key }); // Return the S3 key of the uploaded raw image
+            // })
+            // .catch((err) => {
+            //   console.error(err);
+            //   res.status(500).json({ error: err.message });
+            //});
         }
       });
-  } else {
+  } 
+  
+  else {
     console.log("NO REQ FILE");
-    res.status(400).json({ error: "Image not found." }); // Handle this case
+    res.status(400).json({ error: "Image not found." });
   }
 }
 
@@ -277,9 +285,9 @@ function uploadRawImage(file, format, width, height, isProcessed) {
     let s3Key;
     let params;
 
+    // If not processed (raw image)
     if (!isProcessed) {
       s3Key = `raw-images/${width}x${height}-${file.originalname}`;
-
       const body = fs.createReadStream(file.path);
 
       // Metadata to hold format, width, and height
@@ -297,10 +305,9 @@ function uploadRawImage(file, format, width, height, isProcessed) {
       };
     }
 
+    // Image has been processed already
     else {
       s3Key = `processed-images/output-${path.basename(rawImagePath)}`;
-      
-
       const body = fs.createReadStream(file);
 
       params = { 
