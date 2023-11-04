@@ -6,6 +6,7 @@ const bodyParser = require("body-parser")
 const fs = require("fs")
 const path = require("path")
 const AWS = require("aws-sdk")
+const redis = require('redis');
 
 var width // Images width
 var height // Images height
@@ -93,7 +94,6 @@ const PollMessages = async(req,res)=>
 
       // Then delete the first message
       const del_result = await DeleteMessageFromQueue(result.Messages[0].ReceiptHandle)
-      console.log("Delete successful... " + result.Messages[0].ReceiptHandle);
     }
     
   }
@@ -157,8 +157,6 @@ var storage = multer.diskStorage({
   var upload = multer({ storage: storage, fileFilter: imageFilter });
    
 
-
-
 // S3 setup
 const bucketName = "group-105-bucket-kyle";
 const s3 = new AWS.S3({ apiVersion: "2006-03-01" });
@@ -172,6 +170,20 @@ const s3 = new AWS.S3({ apiVersion: "2006-03-01" });
     if (err.statusCode !== 409) {
       console.log(`Error creating bucket: ${err}`);
     }
+  }
+})();
+
+
+// Redis setup
+const redisClient = redis.createClient({
+  host: "localhost",
+  port: 6379,
+});  
+(async () => {
+  try {
+    await  redisClient.connect();  
+  } catch (err) {
+    console.log(err);
   }
 })();
 
@@ -259,13 +271,16 @@ function processImage(format, width, height, req, res, rawImagePath) {
 
           // Upload the processed image to S3
           uploadRawImage(outputFilePath, format, width, height, true)
-            // .then((s3Key) => {
-            //   res.json({ s3Key }); // Return the S3 key of the uploaded raw image
-            // })
-            // .catch((err) => {
-            //   console.error(err);
-            //   res.status(500).json({ error: err.message });
-            //});
+
+          // Store in Redis cache
+          redisKey = outputFilePath;
+          redisClient.setEx(
+            redisKey,
+            3600,
+            JSON.stringify({ source: "Redis Cache", ...outputFilePath })
+          );
+
+          
         }
       });
   } 
