@@ -193,9 +193,8 @@ app.post("/processimage",upload.single("file"),(req,res) => {
       uploadRawImage(req.file, format, width, height, false)
         .then((s3Key) => {
           res.json({ s3Key }); // Return the S3 key of the uploaded raw image
-
-          sendMessageToQueue(`${s3Key}`) // Used to send SQS messages
-          PollMessages(req,res); // Used to receive SQS messages
+          
+          SQS_Stuff(req, res, s3Key);
         
         })
         .catch((err) => {
@@ -203,6 +202,12 @@ app.post("/processimage",upload.single("file"),(req,res) => {
         });
     }
 })
+
+
+function SQS_Stuff(req, res, s3Key) {
+  sendMessageToQueue(`${s3Key}`) // Used to send SQS messages
+  PollMessages(req,res); // Used to receive SQS messages
+}
 
 
 // Reads the image data
@@ -231,42 +236,38 @@ function readingImageData(format, width, height, req, res, baseImageKey) {
     }
 }
 
-// let data 
-
-// async function readFile(filePath) {
-//   try {
-//     data = await fs.promises.readFile(filePath);
-//     //console.log(data.toString());
-//   } catch (error) {
-//     console.error(`Got an error trying to read the file: ${error.message}`);
-//   }
-// }
-
 // Processes the image
 function processImage(format, width, height, req, res, rawImagePath) {
-
-  //readFile(__dirname + "/raw-images/" + baseImageKey.split("/").pop());
-  //rawImagePath = path.join(__dirname, "raw-images", baseImageKey.split("/").pop());
-
-  //console.log(__dirname + "/raw-images/" + baseImageKey.split("/").pop());
-  //console.log(data);
-  //console.log(req.file);
-  outputFilePath = `processed-images/output-${width}x${height}-${req.file.originalname}`
+  outputFilePath = `processed-images/output-${path.basename(rawImagePath)}`;
 
   // Processes the image
   if (rawImagePath) {
-      sharp(rawImagePath)
-        .resize(width, height)
-        .toFile(outputFilePath, (err, info) => {
-          if (err) throw err;
-
-          // Downloads the image
-          res.download(outputFilePath, (err) => {
-            console.log("PROCESSED IMAGE");
-          });
-        });
-    }
+    sharp(rawImagePath)
+      .resize(width, height)
+      .toFile(outputFilePath, (err, info) => {
+        if (err) {
+          console.error(err);
+          res.status(500).json({ error: err.message }); // Send an error response
+        } else {
+          console.log("PROCESSED IMAGE");
+          // Now, upload the processed image to S3
+          uploadRawImage(outputFilePath, format, width, height, true)
+            .then((s3Key) => {
+              // Send a success response with the S3 key
+              res.json({ s3Key, download: true });
+            })
+            .catch((err) => {
+              console.error(err);
+              res.status(500).json({ error: err.message });
+            });
+        }
+      });
+  } else {
+    console.log("NO REQ FILE");
+    res.status(400).json({ error: "Image not found." }); // Handle this case
+  }
 }
+
 
 
 // Uploading the raw image to S3 bucket
@@ -275,8 +276,6 @@ function uploadRawImage(file, format, width, height, isProcessed) {
 
     let s3Key;
     let params;
-
-    console.log(isProcessed);
 
     if (!isProcessed) {
       s3Key = `raw-images/${width}x${height}-${file.originalname}`;
@@ -299,7 +298,8 @@ function uploadRawImage(file, format, width, height, isProcessed) {
     }
 
     else {
-      s3Key = `processed-images/output-${width}x${height}-${file.originalname}`;
+      s3Key = `processed-images/output-${path.basename(rawImagePath)}`;
+      
 
       const body = fs.createReadStream(file);
 
@@ -316,10 +316,6 @@ function uploadRawImage(file, format, width, height, isProcessed) {
       if (!isProcessed) {
         fs.unlinkSync(file.path);
       }
-      else {
-        fs.unlinkSync(file);
-      }
-
 
       if (uploadErr) {
         reject(uploadErr);
@@ -344,7 +340,6 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
       console.error(err);
     } else {
       imageBuffer = data.Body;
-      console.log("PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP", imageBuffer.file);
       const metadata = data.Metadata;
       console.log("Object Metadata:", metadata);
 
@@ -360,22 +355,6 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
       readingImageData(format, width, height, req, res, baseImageKey);
     }
   });
-
-  processedImagePath = path.join(__dirname, "processed-images/output-", baseImageKey.split("/").pop());
-
-  // Upload the processed image to S3
-  uploadRawImage(processedImagePath, format, width, height, true)
-  .then((s3Key) => {
-    res.json({ s3Key }); // Return the S3 key of the uploaded raw image
-
-    // sendMessageToQueue(`${s3Key}`) // Used to send SQS messages
-    // PollMessages(req,res); // Used to receive SQS messages
-  
-  })
-  .catch((err) => {
-    res.status(500).json({ error: err.message });
-  });
-
 }
 
 
