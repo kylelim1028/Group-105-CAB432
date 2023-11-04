@@ -5,17 +5,20 @@ const sharp = require("sharp")
 const bodyParser = require("body-parser")
 const fs = require("fs")
 const path = require("path")
-const AWS = require("aws-sdk");
+const AWS = require("aws-sdk")
 
-var width // Image's width
-var height // Image's height
-var format // Image's format
+var width // Images width
+var height // Images height
+var format // Images format
 var outputFilePath // Download file path
-var baseImageKey // The S3 object's key
+var baseImageKey // The S3 objects key
 
 var imageBuffer
 
 const PORT = process.env.PORT || 3000
+
+// Set the AWS region
+AWS.config.update({ region: "ap-southeast-2" });
 
 const app = express() 
 app.use(bodyParser.urlencoded({extended:false}))
@@ -76,14 +79,14 @@ const PollMessages = async(req,res)=>
       MaxNumberOfMessages: 10,
       QueueUrl: queueURL,
       WaitTimeSeconds: 10,
-      MessageAttribute: ['All'],
+      MessageAttribute: ["All"],
     });
     const result = await sqsClient.send(command);
 
     // If any messages available
     if (result.Messages && result.Messages.length > 0) {
       console.log("First Message in Queue: " + result.Messages[0].Body); // First message in the queue
-      baseImageKey = result.Messages[0].Body; // Setting the S3 object's key
+      baseImageKey = result.Messages[0].Body; // Setting the S3 objects key
 
       // Retrieve the object from S3 bucket
       downloadRawImage(bucketName, baseImageKey, req, res)
