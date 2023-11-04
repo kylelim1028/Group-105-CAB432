@@ -26,6 +26,7 @@ app.use(bodyParser.urlencoded({extended:false}))
 app.use(bodyParser.json())
 app.use(express.static("public"));
 
+app.set('view engine', 'hbs');
 
 // SQS can send, receive, and delete messages
 const {SQSClient,
@@ -50,7 +51,7 @@ const sendMessageToQueue = async(body)=>
       },
     });
     const result = await sqsClient.send(command)
-    //console.log(result, "success");
+    console.log("SQS Send")
   }
   catch (error)
   {
@@ -83,14 +84,17 @@ const PollMessages = async(req,res)=>
       MessageAttribute: ["All"],
     });
     const result = await sqsClient.send(command);
+    console.log("SQS POLL 1")
 
     // If any messages available
     if (result.Messages && result.Messages.length > 0) {
       console.log("First Message in Queue: " + result.Messages[0].Body); // First message in the queue
       baseImageKey = result.Messages[0].Body; // Setting the S3 objects key
+      console.log(baseImageKey, " SQS POLL 2")
 
       // Retrieve the object from S3 bucket
       downloadRawImage(bucketName, baseImageKey, req, res)
+      console.log("SQS POLL 3")
 
       // Then delete the first message
       const del_result = await DeleteMessageFromQueue(result.Messages[0].ReceiptHandle)
@@ -190,7 +194,7 @@ const redisClient = redis.createClient({
 
 // Uploading to the index page
 app.get("/",(req,res) => {
-    res.sendFile(__dirname + "/index.html") // Processed image goes here
+  res.render("index") // Processed image goes here
 })
 
 
@@ -203,14 +207,17 @@ app.post("/processimage",upload.single("file"),(req,res) => {
     height = parseInt(req.body.height)
 
     if (req.file) {
-      console.log(req.file.path);
+      //console.log(req.file.path);
       
+      const rawImageKey = `raw-images/${width}x${height}-${req.file.originalname}`;
+      console.log(rawImageKey, " FAKE KEY")
+      //SQS_Stuff(req, res, rawImageKey)
+
       // Upload the raw image to S3
       uploadRawImage(req.file, format, width, height, false)
-        .then((s3Key) => {
-          res.json({ s3Key }); // Return the S3 key of the uploaded raw image
-          
-          SQS_Stuff(req, res, s3Key);
+        .then((rawImageKey) => {          
+          //console.log(s3Key, " S3 KEY")
+          SQS_Stuff(req, res, rawImageKey);
         
         })
         .catch((err) => {
@@ -220,8 +227,9 @@ app.post("/processimage",upload.single("file"),(req,res) => {
 })
 
 
-function SQS_Stuff(req, res, s3Key) {
-  sendMessageToQueue(`${s3Key}`) // Used to send SQS messages
+function SQS_Stuff(req, res, rawImageKey) {
+  console.log("SQS Start")
+  sendMessageToQueue(`${rawImageKey}`) // Used to send SQS messages
   PollMessages(req,res); // Used to receive SQS messages
 }
 
@@ -270,7 +278,7 @@ function processImage(format, width, height, req, res, rawImagePath) {
           console.log("PROCESSED IMAGE");
 
           // Upload the processed image to S3
-          uploadRawImage(outputFilePath, format, width, height, true)
+          uploadRawImage(outputFilePath, format, width, height, true, outputFilePath, res)
 
           // Store in Redis cache
           redisKey = outputFilePath;
@@ -278,9 +286,14 @@ function processImage(format, width, height, req, res, rawImagePath) {
             redisKey,
             3600,
             JSON.stringify({ source: "Redis Cache", ...outputFilePath })
-          );
-
-          
+          )
+            // .then (() => {
+            //   res.redirect(`/results?tempPath=${outputFilePath}`)
+            // })
+            // .catch((err) => {
+            //   res.status(500).json({ error: err.message });
+            // });
+            
         }
       });
   } 
@@ -291,10 +304,8 @@ function processImage(format, width, height, req, res, rawImagePath) {
   }
 }
 
-
-
 // Uploading the raw image to S3 bucket
-function uploadRawImage(file, format, width, height, isProcessed) {
+function uploadRawImage(file, format, width, height, isProcessed, outputFilePath, res) {
   return new Promise((resolve, reject) => {
 
     let s3Key;
@@ -344,6 +355,11 @@ function uploadRawImage(file, format, width, height, isProcessed) {
       } else {
         resolve(s3Key);
         console.log("UPLOADED TO S3");
+        
+        if (isProcessed) {
+          res.redirect(`/results?tempPath=${outputFilePath}`)
+        }
+        
       }
     });
   });
@@ -378,6 +394,38 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
     }
   });
 }
+
+
+app.get("/results", async (req, res) => {
+
+  outputFilePath = req.query.tempPath;
+  console.log(outputFilePath, " GGGGGGGGGGGGGGG");
+  console.log(bucketName);
+
+  const params = {
+    Bucket: bucketName,
+    Key: outputFilePath,
+  };
+
+  var dataURL
+
+  // Downloading
+  s3.getObject(params, (err, data) => {
+    if (err) {
+      console.error(err);
+    } else {
+      //imageBuffer = data.Body;
+
+      // Convert the image buffer to a data URL
+      const contentType = data.ContentType;
+      const imageBuffer = data.Body;
+      dataURL = `https://${bucketName}.s3.ap-southeast-2.amazonaws.com/${outputFilePath}`;
+      console.log(dataURL);
+
+      res.render("results", {dataURL})
+    }
+  });  
+})
 
 
 
