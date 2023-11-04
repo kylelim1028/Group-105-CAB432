@@ -128,7 +128,7 @@ if (!fs.existsSync(dir)) {
 
 var storage = multer.diskStorage({
     destination: function (req, file, cb) {
-      cb(null, "public/uploads");
+      cb(null, "raw-images");
     },
     filename: function (req, file, cb) {
       cb(
@@ -206,22 +206,24 @@ app.post("/processimage",upload.single("file"),(req,res) => {
 
 
 // Reads the image data
-function readingImageData(format, width, height, req, res) {
+function readingImageData(format, width, height, req, res, baseImageKey) {
 
-    if(req.file){
+    rawImagePath = path.join(__dirname, "raw-images", baseImageKey.split("/").pop());
+
+    if(rawImagePath){
         //console.log(req.file.path)
 
         if(isNaN(width) || isNaN(height)){
 
-           var dimensions = imageSize(req.file.path)
+           var dimensions = imageSize(rawImagePath)
            console.log(dimensions)
            width = parseInt(dimensions.width)
            height = parseInt(dimensions.height)
-           processImage(format, width, height, req, res) // Start processing the image
+           processImage(format, width, height, req, res, rawImagePath) // Start processing the image
 
         }
         else{
-            processImage(format, width, height, req, res) // Start processing the image
+            processImage(format, width, height, req, res, rawImagePath) // Start processing the image
         }
     }
     else {
@@ -229,14 +231,31 @@ function readingImageData(format, width, height, req, res) {
     }
 }
 
-// Processes the image
-function processImage(format, width, height, req, res) {
+// let data 
 
+// async function readFile(filePath) {
+//   try {
+//     data = await fs.promises.readFile(filePath);
+//     //console.log(data.toString());
+//   } catch (error) {
+//     console.error(`Got an error trying to read the file: ${error.message}`);
+//   }
+// }
+
+// Processes the image
+function processImage(format, width, height, req, res, rawImagePath) {
+
+  //readFile(__dirname + "/raw-images/" + baseImageKey.split("/").pop());
+  //rawImagePath = path.join(__dirname, "raw-images", baseImageKey.split("/").pop());
+
+  //console.log(__dirname + "/raw-images/" + baseImageKey.split("/").pop());
+  //console.log(data);
+  //console.log(req.file);
   outputFilePath = `processed-images/output-${width}x${height}-${req.file.originalname}`
 
   // Processes the image
-  if (req.file) {
-      sharp(path.join(__dirname, "raw-images", baseImageKey.split("/").pop()))
+  if (rawImagePath) {
+      sharp(rawImagePath)
         .resize(width, height)
         .toFile(outputFilePath, (err, info) => {
           if (err) throw err;
@@ -255,34 +274,52 @@ function uploadRawImage(file, format, width, height, isProcessed) {
   return new Promise((resolve, reject) => {
 
     let s3Key;
+    let params;
+
+    console.log(isProcessed);
 
     if (!isProcessed) {
       s3Key = `raw-images/${width}x${height}-${file.originalname}`;
-      
+
+      const body = fs.createReadStream(file.path);
+
+      // Metadata to hold format, width, and height
+      const metadata = {
+        "format" : `${format}`,
+        "width" : `${width}`,
+        "height" : `${height}`,
+      };
+
+      params = { 
+        Bucket: bucketName, 
+        Key: s3Key, 
+        Body: body,
+        Metadata: metadata,
+      };
     }
+
     else {
-      s3Key = `processed-images/output-${width}x${height}-${req.file.originalname}`;
+      s3Key = `processed-images/output-${width}x${height}-${file.originalname}`;
+
+      const body = fs.createReadStream(file);
+
+      params = { 
+        Bucket: bucketName, 
+        Key: s3Key, 
+        Body: body,
+      };
     }
-
-    const body = fs.createReadStream(file.path);
-
-    // Metadata to hold format, width, and height
-    const metadata = {
-      "format" : `${format}`,
-      "width" : `${width}`,
-      "height" : `${height}`,
-    };
-
-    const params = { 
-      Bucket: bucketName, 
-      Key: s3Key, 
-      Body: body,
-      Metadata: metadata,
-    };
 
     // Uploading
     s3.upload(params, (uploadErr, data) => {
-      fs.unlinkSync(file.path);
+
+      if (!isProcessed) {
+        fs.unlinkSync(file.path);
+      }
+      else {
+        fs.unlinkSync(file);
+      }
+
 
       if (uploadErr) {
         reject(uploadErr);
@@ -307,6 +344,7 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
       console.error(err);
     } else {
       imageBuffer = data.Body;
+      console.log("PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP", imageBuffer.file);
       const metadata = data.Metadata;
       console.log("Object Metadata:", metadata);
 
@@ -319,13 +357,14 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
       fs.writeFileSync(localFilePath, imageBuffer);
       console.log("Image Downloaded to", localFilePath);
 
-      readingImageData(format, width, height, req, res);
-      console.log("BITCH");
+      readingImageData(format, width, height, req, res, baseImageKey);
     }
   });
 
+  processedImagePath = path.join(__dirname, "processed-images/output-", baseImageKey.split("/").pop());
+
   // Upload the processed image to S3
-  uploadRawImage(req.file, format, width, height, true)
+  uploadRawImage(processedImagePath, format, width, height, true)
   .then((s3Key) => {
     res.json({ s3Key }); // Return the S3 key of the uploaded raw image
 
@@ -334,11 +373,9 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
   
   })
   .catch((err) => {
-    console.log("ASS");
     res.status(500).json({ error: err.message });
   });
 
-  console.log("HOE");
 }
 
 
