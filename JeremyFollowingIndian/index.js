@@ -6,7 +6,7 @@ const bodyParser = require("body-parser")
 const fs = require("fs")
 const path = require("path")
 const AWS = require("aws-sdk")
-const redis = require('redis');
+const redis = require("redis");
 
 var width // Images width
 var height // Images height
@@ -26,7 +26,7 @@ app.use(bodyParser.urlencoded({extended:false}))
 app.use(bodyParser.json())
 app.use(express.static("public"));
 
-app.set('view engine', 'hbs');
+app.set("view engine", "hbs");
 
 // SQS can send, receive, and delete messages
 const {SQSClient,
@@ -180,7 +180,7 @@ const s3 = new AWS.S3({ apiVersion: "2006-03-01" });
 
 // Redis setup
 const redisClient = redis.createClient({
-  host: "localhost",
+  host: "ec2-13-211-191-224.ap-southeast-2.compute.amazonaws.com",
   port: 6379,
 });  
 (async () => {
@@ -200,7 +200,7 @@ app.get("/",(req,res) => {
 
 // Uploading raw image to S3
 // Sending message to SQS
-app.post("/processimage",upload.single("file"),(req,res) => {
+app.post("/processimage",upload.single("file"), async (req,res) => {
 
     format = req.body.format
     width = parseInt(req.body.width)
@@ -210,7 +210,7 @@ app.post("/processimage",upload.single("file"),(req,res) => {
     console.log(redisKey)
 
     // Check Redis cache
-    const result = redisClient.get(redisKey);
+    const result = await redisClient.get(redisKey);
 
     if (result) {
       console.log("FOUND IN REDIS")
@@ -220,16 +220,14 @@ app.post("/processimage",upload.single("file"),(req,res) => {
 
     else {
       if (req.file) {
-        //console.log(req.file.path);
         
         const rawImageKey = `raw-images/${width}x${height}-${req.file.originalname}`;
         console.log(rawImageKey, " FAKE KEY")
-        //SQS_Stuff(req, res, rawImageKey)
   
         // Upload the raw image to S3
         uploadRawImage(req.file, format, width, height, false)
           .then((rawImageKey) => {          
-            //console.log(s3Key, " S3 KEY")
+
             SQS_Stuff(req, res, rawImageKey);
           
           })
@@ -409,41 +407,32 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
 app.get("/results", async (req, res) => {
 
   outputFilePath = req.query.tempPath;
-  //console.log(outputFilePath, " GGGGGGGGGGGGGGG");
-  //console.log(bucketName);
   console.log(Date.now(), "2")
 
-  // Check Redis cache
-  const result = await redisClient.get(outputFilePath);
-  console.log(Date.now(), "3")
-  // If in Redis Cache
-  if (result) {
-    console.log(Date.now(), "4")
-    const params = {
-      Bucket: bucketName,
-      Key: outputFilePath,
+  console.log(Date.now(), "4")
+  const params = {
+    Bucket: bucketName,
+    Key: outputFilePath,
+  }
+
+  var dataURL
+
+  // Download from S3
+  s3.getObject(params, (err, data) => {
+    if (err) {
+      console.error(err);
+    } 
+    
+    else {
+      // Convert the image buffer to a data URL
+      const contentType = data.ContentType;
+      const imageBuffer = data.Body;
+      dataURL = `https://${bucketName}.s3.ap-southeast-2.amazonaws.com/${outputFilePath}`;
+      console.log(dataURL);
+
+      res.render("results", {dataURL})
     }
-  
-    var dataURL
-  
-    // Download from S3
-    s3.getObject(params, (err, data) => {
-      if (err) {
-        console.error(err);
-      } 
-      
-      else {
-        // Convert the image buffer to a data URL
-        const contentType = data.ContentType;
-        const imageBuffer = data.Body;
-        dataURL = `https://${bucketName}.s3.ap-southeast-2.amazonaws.com/${outputFilePath}`;
-        console.log(dataURL);
-  
-        res.render("results", {dataURL})
-      }
-    });  
-  };
-  
+  });    
 })
 
 
