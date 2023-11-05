@@ -206,24 +206,38 @@ app.post("/processimage",upload.single("file"),(req,res) => {
     width = parseInt(req.body.width)
     height = parseInt(req.body.height)
 
-    if (req.file) {
-      //console.log(req.file.path);
-      
-      const rawImageKey = `raw-images/${width}x${height}-${req.file.originalname}`;
-      console.log(rawImageKey, " FAKE KEY")
-      //SQS_Stuff(req, res, rawImageKey)
+    redisKey = `processed-images/output-${width}x${height}-${req.file.originalname}`
+    console.log(redisKey)
 
-      // Upload the raw image to S3
-      uploadRawImage(req.file, format, width, height, false)
-        .then((rawImageKey) => {          
-          //console.log(s3Key, " S3 KEY")
-          SQS_Stuff(req, res, rawImageKey);
-        
-        })
-        .catch((err) => {
-          res.status(500).json({ error: err.message });
-        });
+    // Check Redis cache
+    const result = redisClient.get(redisKey);
+
+    if (result) {
+      console.log("FOUND IN REDIS")
+      res.redirect(`/results?tempPath=${redisKey}`)
+      return;
     }
+
+    else {
+      if (req.file) {
+        //console.log(req.file.path);
+        
+        const rawImageKey = `raw-images/${width}x${height}-${req.file.originalname}`;
+        console.log(rawImageKey, " FAKE KEY")
+        //SQS_Stuff(req, res, rawImageKey)
+  
+        // Upload the raw image to S3
+        uploadRawImage(req.file, format, width, height, false)
+          .then((rawImageKey) => {          
+            //console.log(s3Key, " S3 KEY")
+            SQS_Stuff(req, res, rawImageKey);
+          
+          })
+          .catch((err) => {
+            res.status(500).json({ error: err.message });
+          });
+      }
+    }    
 })
 
 
@@ -262,6 +276,7 @@ function readingImageData(format, width, height, req, res, baseImageKey) {
 
 // Processes the image
 function processImage(format, width, height, req, res, rawImagePath) {
+  console.log(Date.now(), "0")
   outputFilePath = `processed-images/output-${path.basename(rawImagePath)}`;
 
   // Processes the image
@@ -287,13 +302,8 @@ function processImage(format, width, height, req, res, rawImagePath) {
             3600,
             JSON.stringify({ source: "Redis Cache", ...outputFilePath })
           )
-            // .then (() => {
-            //   res.redirect(`/results?tempPath=${outputFilePath}`)
-            // })
-            // .catch((err) => {
-            //   res.status(500).json({ error: err.message });
-            // });
-            
+
+          console.log(Date.now(), "1")
         }
       });
   } 
@@ -399,32 +409,41 @@ function downloadRawImage(bucketName, baseImageKey, req, res) {
 app.get("/results", async (req, res) => {
 
   outputFilePath = req.query.tempPath;
-  console.log(outputFilePath, " GGGGGGGGGGGGGGG");
-  console.log(bucketName);
+  //console.log(outputFilePath, " GGGGGGGGGGGGGGG");
+  //console.log(bucketName);
+  console.log(Date.now(), "2")
 
-  const params = {
-    Bucket: bucketName,
-    Key: outputFilePath,
-  };
-
-  var dataURL
-
-  // Downloading
-  s3.getObject(params, (err, data) => {
-    if (err) {
-      console.error(err);
-    } else {
-      //imageBuffer = data.Body;
-
-      // Convert the image buffer to a data URL
-      const contentType = data.ContentType;
-      const imageBuffer = data.Body;
-      dataURL = `https://${bucketName}.s3.ap-southeast-2.amazonaws.com/${outputFilePath}`;
-      console.log(dataURL);
-
-      res.render("results", {dataURL})
+  // Check Redis cache
+  const result = await redisClient.get(outputFilePath);
+  console.log(Date.now(), "3")
+  // If in Redis Cache
+  if (result) {
+    console.log(Date.now(), "4")
+    const params = {
+      Bucket: bucketName,
+      Key: outputFilePath,
     }
-  });  
+  
+    var dataURL
+  
+    // Download from S3
+    s3.getObject(params, (err, data) => {
+      if (err) {
+        console.error(err);
+      } 
+      
+      else {
+        // Convert the image buffer to a data URL
+        const contentType = data.ContentType;
+        const imageBuffer = data.Body;
+        dataURL = `https://${bucketName}.s3.ap-southeast-2.amazonaws.com/${outputFilePath}`;
+        console.log(dataURL);
+  
+        res.render("results", {dataURL})
+      }
+    });  
+  };
+  
 })
 
 
