@@ -180,8 +180,11 @@ const s3 = new AWS.S3({ apiVersion: "2006-03-01" });
 
 // Redis setup
 const redisClient = redis.createClient({
-  host: "ec2-13-211-191-224.ap-southeast-2.compute.amazonaws.com",
-  port: 6379,
+  password: "NaTGYy5w6mSvvUR4FLpj70FVV0kuSNEt",
+    socket: {
+        host: "redis-15434.c296.ap-southeast-2-1.ec2.cloud.redislabs.com",
+        port: 15434
+    }
 });  
 (async () => {
   try {
